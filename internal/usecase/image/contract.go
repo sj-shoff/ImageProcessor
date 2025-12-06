@@ -10,10 +10,14 @@ type imageRepository interface {
 	Save(ctx context.Context, image *domain.Image) error
 	GetByID(ctx context.Context, id string) (*domain.Image, error)
 	UpdateStatus(ctx context.Context, id string, status domain.ImageStatus) error
+	Update(ctx context.Context, img *domain.Image) error
 	Delete(ctx context.Context, id string) error
 	SaveProcessedImage(ctx context.Context, processed *domain.ProcessedImage) error
 	GetProcessedImages(ctx context.Context, imageID string) ([]domain.ProcessedImage, error)
+	GetProcessedImageByOperation(ctx context.Context, imageID, operation string) (*domain.ProcessedImage, error)
 	DeleteProcessedImages(ctx context.Context, imageID string) error
+	List(ctx context.Context, limit, offset int) ([]domain.Image, error)
+	Count(ctx context.Context) (int, error)
 }
 
 type fileRepository interface {
