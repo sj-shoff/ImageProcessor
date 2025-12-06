@@ -10,7 +10,9 @@ import (
 	"syscall"
 
 	// "image-processor/internal/broker/kafka"
+	"image-processor/internal/broker/kafka"
 	"image-processor/internal/config"
+
 	// image_h "image-processor/internal/http-server/handler/image"
 	"image-processor/internal/http-server/router"
 	// minio_repo "image-processor/internal/repository/image/cloud/minio"
@@ -26,6 +28,7 @@ type App struct {
 	server *http.Server
 	logger *zlog.Zerolog
 	db     *dbpg.DB
+	broker *kafka.KafkaClient
 }
 
 func NewApp(cfg *config.Config, logger *zlog.Zerolog) (*App, error) {

@@ -10,8 +10,8 @@ import (
 )
 
 type KafkaClient struct {
-	producerClient *producerClient
-	consumerClient *consumerClient
+	producerClient *ProducerClient
+	consumerClient *ConsumerClient
 }
 
 func NewKafkaClient(cfg *config.Config) *KafkaClient {

@@ -23,3 +23,7 @@ type fileRepository interface {
 	DeleteObject(ctx context.Context, path string) error
 	DeleteObjectsWithPrefix(ctx context.Context, prefix string) error
 }
+
+type imageProducer interface {
+	Send(ctx context.Context, task *domain.ProcessingTask) error
+}

@@ -37,6 +37,7 @@ type Config struct {
 
 	MinIO struct {
 		Endpoint  string `env:"MINIO_ENDPOINT" validate:"required"`
+		Region    string `env:"MINIO_REGION" validate:"required"`
 		AccessKey string `env:"MINIO_ACCESS_KEY" validate:"required"`
 		SecretKey string `env:"MINIO_SECRET_KEY" validate:"required"`
 		Bucket    string `env:"MINIO_BUCKET"`

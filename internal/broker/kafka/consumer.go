@@ -9,28 +9,28 @@ import (
 	"github.com/wb-go/wbf/retry"
 )
 
-type consumerClient struct {
+type ConsumerClient struct {
 	consumer *wbkafka.Consumer
 }
 
-func NewConsumerClient(cfg *config.Config) *consumerClient {
-	return &consumerClient{
+func NewConsumerClient(cfg *config.Config) *ConsumerClient {
+	return &ConsumerClient{
 		consumer: wbkafka.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.ResultsTopic, cfg.Kafka.GroupID),
 	}
 }
 
-func (c *consumerClient) Fetch(ctx context.Context, strategy retry.Strategy) (kafka.Message, error) {
+func (c *ConsumerClient) Fetch(ctx context.Context, strategy retry.Strategy) (kafka.Message, error) {
 	return c.consumer.FetchWithRetry(ctx, strategy)
 }
 
-func (c *consumerClient) Commit(ctx context.Context, msg kafka.Message) error {
+func (c *ConsumerClient) Commit(ctx context.Context, msg kafka.Message) error {
 	return c.consumer.Commit(ctx, msg)
 }
 
-func (c *consumerClient) Close() error {
+func (c *ConsumerClient) Close() error {
 	return c.consumer.Close()
 }
 
-func (c *consumerClient) StartConsuming(ctx context.Context, out chan<- kafka.Message, strategy retry.Strategy) {
+func (c *ConsumerClient) StartConsuming(ctx context.Context, out chan<- kafka.Message, strategy retry.Strategy) {
 	c.consumer.StartConsuming(ctx, out, strategy)
 }

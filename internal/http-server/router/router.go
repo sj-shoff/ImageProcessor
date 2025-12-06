@@ -27,10 +27,10 @@ func SetupRouter(h *Handler) http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Route("/images", func(r chi.Router) {
-			// r.Post("/upload", h.ImageHandler.UploadImage)
-			// r.Get("/{id}", h.ImageHandler.GetImage)
-			// r.Get("/{id}/status", h.ImageHandler.GetStatus)
-			// r.Delete("/{id}", h.ImageHandler.DeleteImage)
+			r.Post("/upload", h.ImageHandler.UploadImage)
+			r.Get("/{id}", h.ImageHandler.GetImage)
+			r.Get("/{id}/status", h.ImageHandler.GetStatus)
+			r.Delete("/{id}", h.ImageHandler.DeleteImage)
 		})
 	})
 
