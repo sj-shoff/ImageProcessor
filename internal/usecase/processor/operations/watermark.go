@@ -18,7 +18,6 @@ import (
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
-	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/math/fixed"
 )
@@ -95,12 +94,7 @@ func (w *Watermarker) Process(ctx context.Context, img image.Image, format strin
 
 func (w *Watermarker) addTextWatermark(img image.Image, text, position string, opacity, fontSize float64, fontColorStr string) (image.Image, error) {
 	if w.font == nil {
-		fontBytes := goregular.TTF
-		f, err := truetype.Parse(fontBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load font: %w", err)
-		}
-		w.font = f
+		return nil, fmt.Errorf("font not loaded")
 	}
 
 	bounds := img.Bounds()
@@ -109,7 +103,8 @@ func (w *Watermarker) addTextWatermark(img image.Image, text, position string, o
 
 	col, err := parseColor(fontColorStr, opacity)
 	if err != nil {
-		col = color.RGBA{255, 255, 255, uint8(255 * opacity)}
+		fmt.Printf("Color parse error: %v, using black\n", err)
+		col = color.RGBA{0, 0, 0, uint8(255 * opacity)}
 	}
 
 	c := freetype.NewContext()
@@ -119,38 +114,67 @@ func (w *Watermarker) addTextWatermark(img image.Image, text, position string, o
 	c.SetClip(result.Bounds())
 	c.SetDst(result)
 	c.SetSrc(image.NewUniform(col))
-	c.SetHinting(font.HintingFull)
 
-	textWidth := int(float64(len(text)) * fontSize * 0.6)
-	textHeight := int(fontSize * 1.2)
+	face := truetype.NewFace(w.font, &truetype.Options{
+		Size: fontSize,
+		DPI:  72,
+	})
 
-	var pt fixed.Point26_6
+	var textWidth fixed.Int26_6
+	for _, x := range text {
+		awidth, ok := face.GlyphAdvance(x)
+		if ok {
+			textWidth += awidth
+		}
+	}
+
+	textHeight := fixed.Int26_6(fontSize * 64 * 1.2)
+
+	widthPx := int(textWidth.Ceil())
+	heightPx := int(textHeight.Ceil())
+
+	fmt.Printf("Text '%s': width=%dpx, height=%dpx\n", text, widthPx, heightPx)
+	fmt.Printf("Image size: %dx%d\n", bounds.Dx(), bounds.Dy())
+
 	margin := 20
+	var pt fixed.Point26_6
 
 	switch domain.WatermarkPosition(position) {
 	case domain.WatermarkTopLeft:
-		pt = freetype.Pt(margin, margin+int(fontSize))
+		pt = freetype.Pt(margin, margin+heightPx)
+		fmt.Println("Position: top-left")
 	case domain.WatermarkTopRight:
-		pt = freetype.Pt(bounds.Dx()-textWidth-margin, margin+int(fontSize))
+		pt = freetype.Pt(bounds.Dx()-widthPx-margin, margin+heightPx)
+		fmt.Println("Position: top-right")
 	case domain.WatermarkTopCenter:
-		pt = freetype.Pt((bounds.Dx()-textWidth)/2, margin+int(fontSize))
+		pt = freetype.Pt((bounds.Dx()-widthPx)/2, margin+heightPx)
+		fmt.Println("Position: top-center")
 	case domain.WatermarkBottomLeft:
 		pt = freetype.Pt(margin, bounds.Dy()-margin)
+		fmt.Println("Position: bottom-left")
 	case domain.WatermarkBottomRight:
-		pt = freetype.Pt(bounds.Dx()-textWidth-margin, bounds.Dy()-margin)
+		pt = freetype.Pt(bounds.Dx()-widthPx-margin, bounds.Dy()-margin)
+		fmt.Println("Position: bottom-right")
 	case domain.WatermarkBottomCenter:
-		pt = freetype.Pt((bounds.Dx()-textWidth)/2, bounds.Dy()-margin)
+		pt = freetype.Pt((bounds.Dx()-widthPx)/2, bounds.Dy()-margin)
+		fmt.Println("Position: bottom-center")
 	case domain.WatermarkCenter:
-		pt = freetype.Pt((bounds.Dx()-textWidth)/2, (bounds.Dy()+textHeight)/2)
+		pt = freetype.Pt((bounds.Dx()-widthPx)/2, (bounds.Dy()+heightPx)/2)
+		fmt.Println("Position: center")
 	default:
-		pt = freetype.Pt(bounds.Dx()-textWidth-margin, bounds.Dy()-margin)
+		pt = freetype.Pt(bounds.Dx()-widthPx-margin, bounds.Dy()-margin)
+		fmt.Println("Position: default (bottom-right)")
 	}
 
+	fmt.Printf("Drawing at: x=%d, y=%d\n", pt.X.Ceil(), pt.Y.Ceil())
+
+	c.SetFontSize(fontSize)
 	_, err = c.DrawString(text, pt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to draw watermark text: %w", err)
 	}
 
+	fmt.Println("Watermark drawn successfully")
 	return result, nil
 }
 
