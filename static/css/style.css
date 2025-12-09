@@ -102,8 +102,8 @@ body {
 }
 
 .btn-view:hover {
-    background-color: #138496;
-    border-color: #117a8b;
+    background-color: #ac38cf;
+    border-color: #aa3bb7;
 }
 
 .btn-delete {
@@ -357,6 +357,177 @@ body {
     bottom: 0;
     background: rgba(255, 255, 255, 0.5);
     cursor: not-allowed;
+}
+
+/* Стили для кнопки скачивания */
+.btn-download {
+    background-color: var(--success-color);
+    border-color: var(--success-color);
+    color: white;
+}
+
+.btn-download:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+}
+
+/* Стили для выпадающего меню скачивания */
+.btn-group .btn-success {
+    background-color: var(--success-color);
+    border-color: var(--success-color);
+}
+
+.btn-group .btn-success:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+}
+
+.dropdown-menu {
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    border: 1px solid var(--border-color);
+}
+
+.dropdown-item {
+    padding: 8px 15px;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.dropdown-item:hover {
+    background-color: #f8f9fa;
+    color: var(--primary-color);
+}
+
+.dropdown-item i {
+    width: 20px;
+    text-align: center;
+}
+
+/* Иконка для watermark */
+.fa-water {
+    color: #17a2b8;
+}
+
+/* Адаптивные стили для кнопок */
+@media (max-width: 768px) {
+    .image-actions .btn-group {
+        margin-top: 5px;
+        width: 100%;
+    }
+    
+    .image-actions .btn-group .btn {
+        width: 100%;
+        margin-bottom: 5px;
+    }
+    
+    .dropdown-menu {
+        position: static !important;
+        transform: none !important;
+        width: 100%;
+        margin-top: 5px;
+    }
+}
+
+/* Анимация для скачивания */
+@keyframes download-pulse {
+    0% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+    100% { transform: translateY(0); }
+}
+
+.btn-success:active:not(:disabled) {
+    animation: download-pulse 0.3s ease;
+}
+
+/* Стили для модального окна */
+#imageModal .modal-dialog {
+    max-width: 90%;
+}
+
+#imageModal .modal-body {
+    padding: 20px;
+    background-color: #f8f9fa;
+}
+
+#imageModal img {
+    max-height: 70vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+#imageInfo {
+    background-color: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 15px;
+    border: 1px solid var(--border-color);
+    font-size: 0.9rem;
+}
+
+#imageInfo div {
+    margin-bottom: 5px;
+    padding: 3px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+#imageInfo div:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Улучшаем отображение кнопок в списке изображений */
+.image-actions {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.image-actions .btn {
+    min-width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.image-actions .btn i {
+    font-size: 0.9rem;
+}
+
+/* Tooltip стили */
+.btn[title] {
+    position: relative;
+}
+
+.btn[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    z-index: 1000;
+    margin-bottom: 5px;
+}
+
+.btn[title]:hover::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #333;
+    margin-bottom: -5px;
+    z-index: 1000;
 }
 
 @media (max-width: 768px) {

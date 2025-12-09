@@ -154,7 +154,7 @@
                             <div class="col-md-3 mb-3">
                                 <div class="status-uploaded p-3 rounded">
                                     <i class="fas fa-cloud-upload-alt fa-2x mb-2"></i>
-                                    <div>Загружено</div>
+                                    <div class="status-title">Загружено</div>
                                 </div>
                             </div>
                             <div class="col-md-3 mb-3">
@@ -166,13 +166,13 @@
                             <div class="col-md-3 mb-3">
                                 <div class="status-completed p-3 rounded">
                                     <i class="fas fa-check-circle fa-2x mb-2"></i>
-                                    <div>Готово</div>
+                                    <div class="status-title">Готово</div>
                                 </div>
                             </div>
                             <div class="col-md-3 mb-3">
                                 <div class="status-failed p-3 rounded">
                                     <i class="fas fa-exclamation-circle fa-2x mb-2"></i>
-                                    <div>Ошибка</div>
+                                    <div class="status-title">Ошибка</div>
                                 </div>
                             </div>
                         </div>
@@ -213,21 +213,27 @@
 
     <!-- Image Modal -->
     <div class="modal fade" id="imageModal" tabindex="-1" aria-labelledby="imageModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
             <div class="modal-content">
-                <div class="modal-header">
+                <div class="modal-header bg-primary text-white">
                     <h5 class="modal-title" id="imageModalLabel">Просмотр изображения</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body text-center">
-                    <img id="modalImage" src="" alt="" class="img-fluid">
-                    <div class="mt-3" id="imageInfo"></div>
+                <div class="modal-body">
+                    <div class="text-center">
+                        <img id="modalImage" src="" alt="Просмотр изображения" class="img-fluid rounded shadow">
+                    </div>
+                    <div class="mt-3" id="imageInfo">
+                        <!-- Информация об изображении будет загружена здесь -->
+                    </div>
                 </div>
                 <div class="modal-footer">
-                    <a id="downloadLink" href="#" class="btn btn-primary" download>
-                        <i class="fas fa-download"></i> Скачать
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i> Закрыть
+                    </button>
+                    <a id="downloadLink" href="#" class="btn btn-success" download>
+                        <i class="fas fa-download me-1"></i> Скачать
                     </a>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
                 </div>
             </div>
         </div>

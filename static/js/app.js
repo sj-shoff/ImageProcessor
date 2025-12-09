@@ -283,15 +283,33 @@ class ImageProcessor {
             </div>
             <div class="image-actions">
                 ${image.status === 'completed' ? `
+                    <!-- Кнопки предпросмотра -->
                     <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${image.id}', 'thumbnail')" title="Просмотр миниатюры">
                         <i class="fas fa-th"></i>
                     </button>
                     <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${image.id}', 'resize')" title="Просмотр ресайза">
                         <i class="fas fa-expand"></i>
                     </button>
+                    <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${image.id}', 'watermark')" title="Просмотр с водяным знаком">
+                        <i class="fas fa-water"></i>
+                    </button>
                     <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${image.id}', '')" title="Просмотр оригинала">
                         <i class="fas fa-eye"></i>
                     </button>
+                    
+                    <!-- Кнопки скачивания -->
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown" title="Скачать версии">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${image.id}', 'thumbnail')"><i class="fas fa-th me-2"></i>Миниатюра</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${image.id}', 'resize')"><i class="fas fa-expand me-2"></i>Ресайз</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${image.id}', 'watermark')"><i class="fas fa-water me-2"></i>С водяным знаком</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${image.id}', '')"><i class="fas fa-file-image me-2"></i>Оригинал</a></li>
+                        </ul>
+                    </div>
                 ` : ''}
                 <button class="btn btn-sm btn-delete" onclick="window.imageProcessor.deleteImage('${image.id}')" title="Удалить">
                     <i class="fas fa-trash"></i>
@@ -321,15 +339,34 @@ class ImageProcessor {
                 const actionsElement = item.querySelector('.image-actions');
                 if (actionsElement) {
                     actionsElement.innerHTML = `
+                        <!-- Кнопки предпросмотра -->
                         <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${imageId}', 'thumbnail')" title="Просмотр миниатюры">
                             <i class="fas fa-th"></i>
                         </button>
                         <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${imageId}', 'resize')" title="Просмотр ресайза">
                             <i class="fas fa-expand"></i>
                         </button>
+                        <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${imageId}', 'watermark')" title="Просмотр с водяным знаком">
+                            <i class="fas fa-water"></i>
+                        </button>
                         <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${imageId}', '')" title="Просмотр оригинала">
                             <i class="fas fa-eye"></i>
                         </button>
+                        
+                        <!-- Кнопки скачивания -->
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-sm btn-success dropdown-toggle" data-bs-toggle="dropdown" title="Скачать версии">
+                                <i class="fas fa-download"></i>
+                            </button>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${imageId}', 'thumbnail')"><i class="fas fa-th me-2"></i>Миниатюра</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${imageId}', 'resize')"><i class="fas fa-expand me-2"></i>Ресайз</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${imageId}', 'watermark')"><i class="fas fa-water me-2"></i>С водяным знаком</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="#" onclick="window.imageProcessor.downloadImage('${imageId}', '')"><i class="fas fa-file-image me-2"></i>Оригинал</a></li>
+                            </ul>
+                        </div>
+                        
                         <button class="btn btn-sm btn-delete" onclick="window.imageProcessor.deleteImage('${imageId}')" title="Удалить">
                             <i class="fas fa-trash"></i>
                         </button>
@@ -352,7 +389,6 @@ class ImageProcessor {
                 url += `?operation=${operation}`;
             }
             
-            // Открываем в модальном окне
             const modalElement = document.getElementById('imageModal');
             if (!modalElement) {
                 console.error('Модальное окно не найдено');
@@ -363,32 +399,37 @@ class ImageProcessor {
             const modalImage = document.getElementById('modalImage');
             const imageInfo = document.getElementById('imageInfo');
             const downloadLink = document.getElementById('downloadLink');
+            const modalTitle = document.getElementById('imageModalLabel');
             
-            if (!modalImage || !imageInfo || !downloadLink) {
+            if (!modalImage || !imageInfo || !downloadLink || !modalTitle) {
                 console.error('Элементы модального окна не найдены');
                 return;
             }
             
             modalImage.src = url;
+            
+            const operationText = this.getOperationText(operation);
+            modalTitle.textContent = `Просмотр изображения (${operationText})`;
+            
             downloadLink.href = url;
             downloadLink.download = `image_${imageId}_${operation || 'original'}.jpg`;
             
-            // Получаем информацию об изображении
             try {
                 const response = await fetch(`${this.apiBaseUrl}/${imageId}/status`);
                 if (response.ok) {
                     const data = await response.json();
                     imageInfo.innerHTML = `
-                        <div>ID: ${imageId}</div>
-                        <div>Статус: ${this.getStatusText(data.status)}</div>
-                        <div>Версия: ${operation ? operation : 'оригинал'}</div>
+                        <div><strong>ID:</strong> ${imageId}</div>
+                        <div><strong>Статус:</strong> ${this.getStatusText(data.status)}</div>
+                        <div><strong>Версия:</strong> ${operationText}</div>
+                        <div><strong>Размер:</strong> ${this.formatFileSize(data.size || 0)}</div>
                     `;
                 }
             } catch (error) {
                 console.error('Ошибка при получении информации об изображении:', error);
                 imageInfo.innerHTML = `
-                    <div>ID: ${imageId}</div>
-                    <div>Версия: ${operation ? operation : 'оригинал'}</div>
+                    <div><strong>ID:</strong> ${imageId}</div>
+                    <div><strong>Версия:</strong> ${operationText}</div>
                 `;
             }
             
@@ -396,6 +437,46 @@ class ImageProcessor {
         } catch (error) {
             console.error('Ошибка при открытии изображения:', error);
             this.showAlert('Ошибка при открытии изображения', 'danger');
+        }
+    }
+
+    async downloadImage(imageId, operation = '') {
+        try {
+            let url = `${this.apiBaseUrl}/${imageId}`;
+            if (operation) {
+                url += `?operation=${operation}`;
+            }
+            
+            const operationText = this.getOperationText(operation);
+            this.showAlert(`Начинается скачивание: ${operationText}`, 'info');
+            
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const blob = await response.blob();
+            const downloadUrl = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = `image_${imageId}_${operation || 'original'}.jpg`;
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            window.URL.revokeObjectURL(downloadUrl);
+            
+            this.showAlert(`Изображение "${operationText}" успешно скачано`, 'success');
+            
+        } catch (error) {
+            console.error('Ошибка при скачивании изображения:', error);
+            
+            if (error.message.includes('404')) {
+                this.showAlert(`Версия изображения "${this.getOperationText(operation)}" не найдена`, 'warning');
+            } else {
+                this.showAlert('Ошибка при скачивании изображения', 'danger');
+            }
         }
     }
 
@@ -414,10 +495,8 @@ class ImageProcessor {
                 if (item) {
                     item.remove();
                     
-                    // Удаляем из отслеживаемых processedImages
                     const fileName = item.querySelector('.image-name').textContent;
                     
-                    // Находим и удаляем соответствующий ключ из processedImages
                     for (const [key, value] of this.processedImages.entries()) {
                         if (value.id === imageId) {
                             this.processedImages.delete(key);
@@ -429,7 +508,6 @@ class ImageProcessor {
                 
                 this.showAlert('Изображение удалено успешно', 'success');
                 
-                // Показываем сообщение о пустом списке если нужно
                 this.checkEmptyList();
                 
             } else {
@@ -454,12 +532,22 @@ class ImageProcessor {
     getStatusText(status) {
         const statusMap = {
             'uploaded': 'Загружено',
-            'processing': 'В\u00A0обработке', // Используем неразрывный пробел
+            'processing': 'В\u00A0обработке',
             'completed': 'Готово',
             'failed': 'Ошибка',
             'deleted': 'Удалено'
         };
         return statusMap[status] || status;
+    }
+
+    getOperationText(operation) {
+        const operationMap = {
+            '': 'оригинал',
+            'thumbnail': 'миниатюра',
+            'resize': 'ресайз',
+            'watermark': 'с водяным знаком'
+        };
+        return operationMap[operation] || operation;
     }
 
     formatFileSize(bytes) {
@@ -503,7 +591,6 @@ class ImageProcessor {
         
         alertsContainer.prepend(alertDiv);
         
-        // Автоматическое удаление через 5 секунд
         setTimeout(() => {
             const alert = document.getElementById(alertId);
             if (alert) {
@@ -512,7 +599,6 @@ class ImageProcessor {
         }, 5000);
     }
 
-    // Очистка ресурсов при уничтожении
     destroy() {
         console.log('Очистка ресурсов ImageProcessor');
         
@@ -521,7 +607,6 @@ class ImageProcessor {
             this.pollingIntervalId = null;
         }
         
-        // Удаляем все обработчики событий
         const uploadForm = document.getElementById('uploadForm');
         const fileInput = document.getElementById('fileInput');
         const watermarkCheckbox = document.getElementById('watermark');
@@ -544,13 +629,11 @@ let imageProcessor = null;
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM загружен, инициализация ImageProcessor...');
     
-    // Очищаем предыдущий экземпляр если есть
     if (imageProcessor) {
         console.log('Очистка предыдущего экземпляра ImageProcessor');
         imageProcessor.destroy();
     }
     
-    // Создаем новый экземпляр
     try {
         imageProcessor = new ImageProcessor();
         console.log('ImageProcessor успешно инициализирован');
@@ -559,13 +642,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
     
-    // Делаем глобально доступным
     window.imageProcessor = imageProcessor;
     
     console.log('ImageProcessor готов к работе');
 });
 
-// Очистка при выгрузке страницы
 window.addEventListener('beforeunload', () => {
     console.log('Очистка ImageProcessor перед выгрузкой страницы');
     if (imageProcessor) {
