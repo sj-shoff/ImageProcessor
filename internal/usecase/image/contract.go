@@ -2,8 +2,11 @@ package image
 
 import (
 	"context"
-	"image-processor/internal/domain"
 	"io"
+
+	"image-processor/internal/domain"
+
+	"github.com/wb-go/wbf/retry"
 )
 
 type imageRepository interface {
@@ -29,5 +32,5 @@ type fileRepository interface {
 }
 
 type imageProducer interface {
-	Send(ctx context.Context, task *domain.ProcessingTask) error
+	SendProcessingTask(ctx context.Context, strategy retry.Strategy, key, value []byte) error
 }

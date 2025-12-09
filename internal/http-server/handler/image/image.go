@@ -14,6 +14,7 @@ import (
 
 	"image-processor/internal/domain"
 	"image-processor/internal/http-server/handler/image/dto"
+	image_uc "image-processor/internal/usecase/image"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -21,7 +22,7 @@ import (
 )
 
 const (
-	maxMemory = 32 << 20 // 32MB
+	maxMemory = 32 << 20
 )
 
 type ImageHandler struct {
@@ -279,10 +280,10 @@ func (h *ImageHandler) parseOperationsFromForm(form url.Values) []domain.Operati
 
 func (h *ImageHandler) handleUploadError(w http.ResponseWriter, err error, filename string) {
 	switch {
-	case errors.Is(err, ErrInvalidFileFormat):
+	case errors.Is(err, image_uc.ErrInvalidFileFormat):
 		h.logger.Warn().Str("filename", filename).Msg("Invalid file format")
 		h.respondError(w, http.StatusBadRequest, "Unsupported file format", nil)
-	case errors.Is(err, ErrFileTooLarge):
+	case errors.Is(err, image_uc.ErrFileTooLarge):
 		h.logger.Warn().Str("filename", filename).Msg("File too large")
 		h.respondError(w, http.StatusRequestEntityTooLarge, "File too large", nil)
 	default:
@@ -293,10 +294,10 @@ func (h *ImageHandler) handleUploadError(w http.ResponseWriter, err error, filen
 
 func (h *ImageHandler) handleGetImageError(w http.ResponseWriter, err error, imageID, operation string) {
 	switch {
-	case errors.Is(err, ErrImageNotFound):
+	case errors.Is(err, image_uc.ErrImageNotFound):
 		h.logger.Info().Str("image_id", imageID).Msg("Image not found")
 		h.respondError(w, http.StatusNotFound, "Image not found", nil)
-	case errors.Is(err, ErrProcessedImageNotFound):
+	case errors.Is(err, image_uc.ErrProcessedImageNotFound):
 		h.logger.Info().Str("image_id", imageID).Str("operation", operation).Msg("Processed image not found")
 		h.respondError(w, http.StatusNotFound, "Processed version not found", nil)
 	default:
@@ -307,7 +308,7 @@ func (h *ImageHandler) handleGetImageError(w http.ResponseWriter, err error, ima
 
 func (h *ImageHandler) handleStatusError(w http.ResponseWriter, err error, imageID string) {
 	switch {
-	case errors.Is(err, ErrImageNotFound):
+	case errors.Is(err, image_uc.ErrImageNotFound):
 		h.respondError(w, http.StatusNotFound, "Image not found", nil)
 	default:
 		h.logger.Error().Err(err).Str("image_id", imageID).Msg("Failed to get status")
@@ -317,7 +318,7 @@ func (h *ImageHandler) handleStatusError(w http.ResponseWriter, err error, image
 
 func (h *ImageHandler) handleDeleteError(w http.ResponseWriter, err error, imageID string) {
 	switch {
-	case errors.Is(err, ErrImageNotFound):
+	case errors.Is(err, image_uc.ErrImageNotFound):
 		h.respondError(w, http.StatusNotFound, "Image not found", nil)
 	default:
 		h.logger.Error().Err(err).Str("image_id", imageID).Msg("Failed to delete image")

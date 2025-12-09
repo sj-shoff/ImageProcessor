@@ -75,13 +75,18 @@ body {
     transition: all 0.2s;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
     background-color: var(--secondary-color);
     border-color: var(--secondary-color);
     transform: translateY(-1px);
 }
 
-.btn-primary:active {
+.btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-primary:active:not(:disabled) {
     transform: translateY(0);
 }
 
@@ -97,7 +102,7 @@ body {
 }
 
 .btn-view:hover {
-    background-color: #4e1396;
+    background-color: #138496;
     border-color: #117a8b;
 }
 
@@ -147,63 +152,80 @@ body {
 .image-info {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
 }
 
 .image-name {
     font-weight: 600;
-    margin-bottom: 5px;
+    margin-bottom: 0;
     color: var(--dark-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
+.image-meta {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
 .image-size {
     color: var(--gray-text);
     font-size: 0.9rem;
-    margin-bottom: 5px;
+    margin: 0;
 }
 
 .image-status {
     display: inline-block;
-    padding: 3px 10px;
+    padding: 4px 12px;
     border-radius: 4px;
     font-size: 0.8rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-align: center;
+    min-width: 110px; /* Фиксированная ширина для всех статусов */
 }
 
 .status-uploaded {
     background-color: #e3f2fd;
     color: #1976d2;
+    border: 1px solid #bbdefb;
 }
 
 .status-processing {
     background-color: #fff3cd;
     color: #856404;
+    border: 1px solid #ffeaa7;
     animation: pulse 2s infinite;
 }
 
 .status-completed {
     background-color: #d4edda;
     color: #155724;
+    border: 1px solid #c3e6cb;
 }
 
 .status-failed {
     background-color: #f8d7da;
     color: #721c24;
+    border: 1px solid #f5c6cb;
 }
 
 .image-date {
     color: var(--gray-text);
     font-size: 0.8rem;
-    margin-top: 5px;
+    margin: 0;
 }
 
 .image-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     flex-shrink: 0;
 }
 
@@ -224,6 +246,12 @@ body {
     100% {
         opacity: 1;
     }
+}
+
+@keyframes btn-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
 }
 
 .form-check-input:checked {
@@ -258,6 +286,27 @@ body {
     margin-bottom: 5px;
 }
 
+.status-indicator .status-uploaded {
+    background-color: #e3f2fd;
+    color: #1976d2;
+}
+
+.status-indicator .status-processing {
+    background-color: #fff3cd;
+    color: #856404;
+    animation: pulse 2s infinite;
+}
+
+.status-indicator .status-completed {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.status-indicator .status-failed {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
 .modal-content {
     border-radius: 10px;
     border: none;
@@ -284,6 +333,32 @@ body {
     color: var(--gray-text);
 }
 
+/* Стили для предотвращения двойного клика */
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.form-disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.uploading {
+    position: relative;
+}
+
+.uploading::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.5);
+    cursor: not-allowed;
+}
+
 @media (max-width: 768px) {
     .container {
         margin-top: 15px;
@@ -296,10 +371,19 @@ body {
     .image-item {
         flex-direction: column;
         align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .image-info {
+        width: 100%;
+    }
+    
+    .image-meta {
+        gap: 10px;
     }
     
     .image-actions {
-        margin-top: 10px;
+        margin-top: 5px;
         width: 100%;
         justify-content: flex-end;
     }
@@ -326,6 +410,18 @@ body {
     
     .card-body {
         padding: 15px;
+    }
+    
+    .image-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .image-status {
+        min-width: 100px;
+        padding: 3px 8px;
+        font-size: 0.75rem;
     }
 }
 
@@ -370,4 +466,12 @@ body {
 
 .tooltip-arrow::before {
     border-top-color: var(--primary-color) !important;
+}
+
+/* Новые стили для заголовков статусов в правой колонке */
+.status-indicator .status-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-top: 5px;
+    white-space: nowrap;
 }

@@ -2,6 +2,11 @@ class ImageProcessor {
     constructor() {
         this.apiBaseUrl = '/api/images';
         this.pollingInterval = 5000; // 5 seconds
+        this.isUploading = false;
+        this.lastUploadTime = 0;
+        this.pollingIntervalId = null;
+        this.processedImages = new Map(); // Для отслеживания уже обработанных изображений
+        this.isPolling = false;
         this.initEventListeners();
         this.loadImages();
         this.startPolling();
@@ -12,13 +17,38 @@ class ImageProcessor {
         const fileInput = document.getElementById('fileInput');
         const watermarkCheckbox = document.getElementById('watermark');
         
-        uploadForm.addEventListener('submit', (e) => this.handleUpload(e));
+        // Удаляем старые обработчики если они есть
+        uploadForm.removeEventListener('submit', this.handleUpload.bind(this));
+        fileInput.removeEventListener('change', this.handleFileSelect.bind(this));
+        watermarkCheckbox.removeEventListener('change', this.toggleWatermarkText.bind(this));
+        
+        // Добавляем новые обработчики с правильным контекстом
+        uploadForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleUpload(e);
+        }, { once: false });
+        
         fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
         watermarkCheckbox.addEventListener('change', (e) => this.toggleWatermarkText(e));
+        
+        console.log('Event listeners initialized');
     }
 
     async handleUpload(e) {
-        e.preventDefault();
+        console.log('handleUpload called');
+        
+        // Защита от двойной отправки
+        if (this.isUploading) {
+            console.log('Предотвращена двойная отправка: уже загружается');
+            return;
+        }
+        
+        const now = Date.now();
+        if (now - this.lastUploadTime < 2000) {
+            console.log('Предотвращена частая отправка: прошло менее 2 секунд');
+            this.showAlert('Пожалуйста, подождите 2 секунды перед следующей загрузкой', 'warning');
+            return;
+        }
         
         const fileInput = document.getElementById('fileInput');
         const file = fileInput.files[0];
@@ -38,6 +68,19 @@ class ImageProcessor {
             return;
         }
         
+        // Проверяем, не загружали ли уже этот файл (по имени и размеру)
+        const fileKey = `${file.name}_${file.size}_${file.lastModified}`;
+        if (this.processedImages.has(fileKey)) {
+            console.log('Файл уже был загружен ранее:', fileKey);
+            this.showAlert('Этот файл уже был загружен', 'info');
+            return;
+        }
+        
+        this.isUploading = true;
+        this.lastUploadTime = now;
+        
+        this.setUploadingState(true);
+        
         const formData = new FormData();
         formData.append('file', file);
         formData.append('thumbnail', document.getElementById('thumbnail').checked);
@@ -49,30 +92,50 @@ class ImageProcessor {
             formData.append('watermark_text', watermarkText);
         }
         
-        this.setUploadingState(true);
-        
         try {
+            console.log('Отправка запроса на загрузку...');
             const response = await fetch(`${this.apiBaseUrl}/upload`, {
                 method: 'POST',
                 body: formData
             });
             
+            console.log('Ответ получен, статус:', response.status);
+            
             if (!response.ok) {
-                const error = await response.json();
+                const error = await response.json().catch(() => ({ message: 'Ошибка загрузки' }));
                 throw new Error(error.message || 'Ошибка загрузки');
             }
             
             const result = await response.json();
+            console.log('Успешный ответ:', result);
+            
             this.showAlert('Изображение загружено успешно! Обработка начата.', 'success');
+            
+            // Добавляем файл в обработанные
+            this.processedImages.set(fileKey, {
+                id: result.id,
+                timestamp: Date.now()
+            });
+            
+            // Добавляем изображение в список
             this.addImageToList(result);
+            
+            // Очищаем форму
             fileInput.value = '';
             document.getElementById('preview').style.display = 'none';
             document.getElementById('fileName').textContent = '';
+            
         } catch (error) {
             console.error('Upload error:', error);
             this.showAlert(error.message || 'Ошибка при загрузке изображения', 'danger');
         } finally {
             this.setUploadingState(false);
+            this.isUploading = false;
+            
+            // Через 5 минут удаляем из processedImages чтобы можно было загрузить тот же файл снова
+            setTimeout(() => {
+                this.processedImages.delete(fileKey);
+            }, 5 * 60 * 1000); // 5 минут
         }
     }
 
@@ -103,14 +166,18 @@ class ImageProcessor {
 
     async loadImages() {
         try {
-            // In a real app, you would have an endpoint for listing images
-            // For now, we'll just show a message
+            console.log('Загрузка списка изображений...');
+            // В реальном приложении здесь был бы запрос к API для получения списка
             const imageList = document.getElementById('imageList');
             
-            // Check if there are any images in the list
+            // Проверяем, есть ли уже изображения
             const items = imageList.querySelectorAll('.image-item');
             if (items.length === 0) {
-                imageList.innerHTML = '<p class="text-center text-muted">Загруженные изображения появятся здесь</p>';
+                // Показываем только один раз при загрузке
+                if (!imageList.dataset.initialized) {
+                    imageList.innerHTML = '<p class="text-center text-muted">Загруженные изображения появятся здесь</p>';
+                    imageList.dataset.initialized = 'true';
+                }
             }
         } catch (error) {
             console.error('Ошибка загрузки изображений:', error);
@@ -118,34 +185,84 @@ class ImageProcessor {
     }
 
     startPolling() {
-        // Poll for status updates
-        setInterval(() => this.checkProcessingStatus(), this.pollingInterval);
+        // Останавливаем предыдущий интервал если он был
+        if (this.pollingIntervalId) {
+            clearInterval(this.pollingIntervalId);
+        }
+        
+        console.log('Запуск polling с интервалом:', this.pollingInterval);
+        this.pollingIntervalId = setInterval(() => {
+            if (!this.isPolling) {
+                this.checkProcessingStatus();
+            }
+        }, this.pollingInterval);
     }
 
     async checkProcessingStatus() {
-        const processingItems = document.querySelectorAll('.image-item[data-status="processing"], .image-item[data-status="uploaded"]');
+        if (this.isPolling) {
+            console.log('Предотвращен одновременный polling');
+            return;
+        }
         
-        for (const item of processingItems) {
-            const imageId = item.dataset.id;
-            try {
-                const response = await fetch(`${this.apiBaseUrl}/${imageId}/status`);
-                if (response.ok) {
-                    const statusData = await response.json();
-                    this.updateImageStatus(imageId, statusData.status);
-                }
-            } catch (error) {
-                console.error('Ошибка проверки статуса:', error);
+        this.isPolling = true;
+        
+        try {
+            const processingItems = document.querySelectorAll('.image-item[data-status="processing"], .image-item[data-status="uploaded"]');
+            
+            if (processingItems.length > 0) {
+                console.log('Проверка статуса для', processingItems.length, 'изображений');
+                
+                // Используем Promise.allSettled для параллельной проверки
+                const promises = Array.from(processingItems).map(async (item) => {
+                    const imageId = item.dataset.id;
+                    try {
+                        const response = await fetch(`${this.apiBaseUrl}/${imageId}/status`, {
+                            headers: {
+                                'Cache-Control': 'no-cache',
+                                'Pragma': 'no-cache'
+                            }
+                        });
+                        
+                        if (response.ok) {
+                            const statusData = await response.json();
+                            // Обновляем только если статус изменился
+                            if (item.dataset.status !== statusData.status) {
+                                console.log('Обновление статуса для', imageId, 'с', item.dataset.status, 'на', statusData.status);
+                                this.updateImageStatus(imageId, statusData.status);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Ошибка проверки статуса для', imageId, ':', error);
+                    }
+                });
+                
+                await Promise.allSettled(promises);
             }
+        } catch (error) {
+            console.error('Ошибка в checkProcessingStatus:', error);
+        } finally {
+            this.isPolling = false;
         }
     }
 
     addImageToList(image) {
         const imageList = document.getElementById('imageList');
         
-        // Remove default message
-        if (imageList.querySelector('p')) {
-            imageList.innerHTML = '';
+        // Удаляем сообщение о пустом списке
+        const emptyMessage = imageList.querySelector('p');
+        if (emptyMessage && emptyMessage.textContent.includes('Загруженные изображения появятся здесь')) {
+            emptyMessage.remove();
         }
+        
+        // Проверяем, нет ли уже этого изображения в списке
+        const existingItem = imageList.querySelector(`.image-item[data-id="${image.id}"]`);
+        if (existingItem) {
+            console.log('Изображение уже есть в списке, обновляем статус:', image.id);
+            this.updateImageStatus(image.id, image.status);
+            return;
+        }
+        
+        console.log('Добавление нового изображения в список:', image.id);
         
         const item = document.createElement('div');
         item.className = `image-item status-${image.status}`;
@@ -158,34 +275,38 @@ class ImageProcessor {
         item.innerHTML = `
             <div class="image-info">
                 <div class="image-name" title="${image.filename}">${image.filename}</div>
-                <div class="image-size">${this.formatFileSize(image.size)}</div>
-                <div class="image-status status-${image.status}">${statusText}</div>
-                <div class="image-date">${formattedDate}</div>
+                <div class="image-meta">
+                    <div class="image-size">${this.formatFileSize(image.size)}</div>
+                    <div class="image-status status-${image.status}">${statusText}</div>
+                    <div class="image-date">${formattedDate}</div>
+                </div>
             </div>
             <div class="image-actions">
                 ${image.status === 'completed' ? `
-                    <button class="btn btn-sm btn-view" onclick="imageProcessor.viewImage('${image.id}', 'thumbnail')" title="Просмотр миниатюры">
+                    <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${image.id}', 'thumbnail')" title="Просмотр миниатюры">
                         <i class="fas fa-th"></i>
                     </button>
-                    <button class="btn btn-sm btn-view" onclick="imageProcessor.viewImage('${image.id}', 'resize')" title="Просмотр ресайза">
+                    <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${image.id}', 'resize')" title="Просмотр ресайза">
                         <i class="fas fa-expand"></i>
                     </button>
-                    <button class="btn btn-sm btn-view" onclick="imageProcessor.viewImage('${image.id}', '')" title="Просмотр оригинала">
+                    <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${image.id}', '')" title="Просмотр оригинала">
                         <i class="fas fa-eye"></i>
                     </button>
                 ` : ''}
-                <button class="btn btn-sm btn-delete" onclick="imageProcessor.deleteImage('${image.id}')" title="Удалить">
+                <button class="btn btn-sm btn-delete" onclick="window.imageProcessor.deleteImage('${image.id}')" title="Удалить">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
         `;
         
+        // Добавляем в начало списка
         imageList.prepend(item);
     }
 
     updateImageStatus(imageId, status) {
         const item = document.querySelector(`.image-item[data-id="${imageId}"]`);
         if (item) {
+            const oldStatus = item.dataset.status;
             item.dataset.status = status;
             item.className = `image-item status-${status}`;
             
@@ -195,28 +316,31 @@ class ImageProcessor {
                 statusElement.textContent = this.getStatusText(status);
             }
             
-            // Add view buttons if processing is complete
-            if (status === 'completed') {
+            // Если статус изменился на "completed", обновляем кнопки
+            if (status === 'completed' && oldStatus !== 'completed') {
                 const actionsElement = item.querySelector('.image-actions');
-                actionsElement.innerHTML = `
-                    <button class="btn btn-sm btn-view" onclick="imageProcessor.viewImage('${imageId}', 'thumbnail')" title="Просмотр миниатюры">
-                        <i class="fas fa-th"></i>
-                    </button>
-                    <button class="btn btn-sm btn-view" onclick="imageProcessor.viewImage('${imageId}', 'resize')" title="Просмотр ресайза">
-                        <i class="fas fa-expand"></i>
-                    </button>
-                    <button class="btn btn-sm btn-view" onclick="imageProcessor.viewImage('${imageId}', '')" title="Просмотр оригинала">
-                        <i class="fas fa-eye"></i>
-                    </button>
-                    <button class="btn btn-sm btn-delete" onclick="imageProcessor.deleteImage('${imageId}')" title="Удалить">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                `;
-            }
-            
-            // Show success message when processing completes
-            if (status === 'completed' && item.dataset.status !== 'completed') {
-                this.showAlert('Обработка изображения завершена!', 'success');
+                if (actionsElement) {
+                    actionsElement.innerHTML = `
+                        <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${imageId}', 'thumbnail')" title="Просмотр миниатюры">
+                            <i class="fas fa-th"></i>
+                        </button>
+                        <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${imageId}', 'resize')" title="Просмотр ресайза">
+                            <i class="fas fa-expand"></i>
+                        </button>
+                        <button class="btn btn-sm btn-view" onclick="window.imageProcessor.viewImage('${imageId}', '')" title="Просмотр оригинала">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="btn btn-sm btn-delete" onclick="window.imageProcessor.deleteImage('${imageId}')" title="Удалить">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    `;
+                }
+                
+                // Показываем сообщение только один раз при завершении обработки
+                if (!item.dataset.notified) {
+                    this.showAlert(`Обработка изображения "${item.querySelector('.image-name').textContent}" завершена!`, 'success');
+                    item.dataset.notified = 'true';
+                }
             }
         }
     }
@@ -228,23 +352,42 @@ class ImageProcessor {
                 url += `?operation=${operation}`;
             }
             
-            // Open in modal
-            const modal = new bootstrap.Modal(document.getElementById('imageModal'));
+            // Открываем в модальном окне
+            const modalElement = document.getElementById('imageModal');
+            if (!modalElement) {
+                console.error('Модальное окно не найдено');
+                return;
+            }
+            
+            const modal = new bootstrap.Modal(modalElement);
             const modalImage = document.getElementById('modalImage');
             const imageInfo = document.getElementById('imageInfo');
             const downloadLink = document.getElementById('downloadLink');
+            
+            if (!modalImage || !imageInfo || !downloadLink) {
+                console.error('Элементы модального окна не найдены');
+                return;
+            }
             
             modalImage.src = url;
             downloadLink.href = url;
             downloadLink.download = `image_${imageId}_${operation || 'original'}.jpg`;
             
-            // Get image info
-            const response = await fetch(`${this.apiBaseUrl}/${imageId}/status`);
-            if (response.ok) {
-                const data = await response.json();
+            // Получаем информацию об изображении
+            try {
+                const response = await fetch(`${this.apiBaseUrl}/${imageId}/status`);
+                if (response.ok) {
+                    const data = await response.json();
+                    imageInfo.innerHTML = `
+                        <div>ID: ${imageId}</div>
+                        <div>Статус: ${this.getStatusText(data.status)}</div>
+                        <div>Версия: ${operation ? operation : 'оригинал'}</div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Ошибка при получении информации об изображении:', error);
                 imageInfo.innerHTML = `
                     <div>ID: ${imageId}</div>
-                    <div>Статус: ${this.getStatusText(data.status)}</div>
                     <div>Версия: ${operation ? operation : 'оригинал'}</div>
                 `;
             }
@@ -270,11 +413,25 @@ class ImageProcessor {
                 const item = document.querySelector(`.image-item[data-id="${imageId}"]`);
                 if (item) {
                     item.remove();
+                    
+                    // Удаляем из отслеживаемых processedImages
+                    const fileName = item.querySelector('.image-name').textContent;
+                    
+                    // Находим и удаляем соответствующий ключ из processedImages
+                    for (const [key, value] of this.processedImages.entries()) {
+                        if (value.id === imageId) {
+                            this.processedImages.delete(key);
+                            console.log('Удален из processedImages:', key);
+                            break;
+                        }
+                    }
                 }
+                
                 this.showAlert('Изображение удалено успешно', 'success');
                 
-                // Reload images list
-                this.loadImages();
+                // Показываем сообщение о пустом списке если нужно
+                this.checkEmptyList();
+                
             } else {
                 const error = await response.json();
                 throw new Error(error.message || 'Ошибка удаления');
@@ -285,10 +442,19 @@ class ImageProcessor {
         }
     }
 
+    checkEmptyList() {
+        const imageList = document.getElementById('imageList');
+        const items = imageList.querySelectorAll('.image-item');
+        
+        if (items.length === 0 && !imageList.querySelector('p')) {
+            imageList.innerHTML = '<p class="text-center text-muted">Загруженные изображения появятся здесь</p>';
+        }
+    }
+
     getStatusText(status) {
         const statusMap = {
             'uploaded': 'Загружено',
-            'processing': 'В обработке',
+            'processing': 'В\u00A0обработке', // Используем неразрывный пробел
             'completed': 'Готово',
             'failed': 'Ошибка',
             'deleted': 'Удалено'
@@ -308,20 +474,22 @@ class ImageProcessor {
         const uploadBtn = document.getElementById('uploadBtn');
         const uploadSpinner = document.getElementById('uploadSpinner');
         
-        uploadBtn.disabled = isUploading;
-        uploadSpinner.style.display = isUploading ? 'block' : 'none';
+        if (uploadBtn) {
+            uploadBtn.disabled = isUploading;
+            uploadBtn.innerHTML = isUploading 
+                ? '<i class="fas fa-spinner fa-spin"></i> Загрузка...' 
+                : '<i class="fas fa-upload"></i> Загрузить и обработать';
+        }
         
-        if (isUploading) {
-            uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Загрузка...';
-            uploadBtn.classList.add('disabled');
-        } else {
-            uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Загрузить и обработать';
-            uploadBtn.classList.remove('disabled');
+        if (uploadSpinner) {
+            uploadSpinner.style.display = isUploading ? 'block' : 'none';
         }
     }
 
     showAlert(message, type) {
         const alertsContainer = document.getElementById('alerts');
+        if (!alertsContainer) return;
+        
         const alertId = 'alert-' + Date.now();
         
         const alertDiv = document.createElement('div');
@@ -335,7 +503,7 @@ class ImageProcessor {
         
         alertsContainer.prepend(alertDiv);
         
-        // Auto-remove after 5 seconds
+        // Автоматическое удаление через 5 секунд
         setTimeout(() => {
             const alert = document.getElementById(alertId);
             if (alert) {
@@ -343,14 +511,64 @@ class ImageProcessor {
             }
         }, 5000);
     }
+
+    // Очистка ресурсов при уничтожении
+    destroy() {
+        console.log('Очистка ресурсов ImageProcessor');
+        
+        if (this.pollingIntervalId) {
+            clearInterval(this.pollingIntervalId);
+            this.pollingIntervalId = null;
+        }
+        
+        // Удаляем все обработчики событий
+        const uploadForm = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('fileInput');
+        const watermarkCheckbox = document.getElementById('watermark');
+        
+        if (uploadForm) {
+            uploadForm.removeEventListener('submit', this.handleUpload.bind(this));
+        }
+        if (fileInput) {
+            fileInput.removeEventListener('change', this.handleFileSelect.bind(this));
+        }
+        if (watermarkCheckbox) {
+            watermarkCheckbox.removeEventListener('change', this.toggleWatermarkText.bind(this));
+        }
+    }
 }
 
-// Initialize the application
-let imageProcessor;
+// Инициализация приложения
+let imageProcessor = null;
 
 document.addEventListener('DOMContentLoaded', () => {
-    imageProcessor = new ImageProcessor();
+    console.log('DOM загружен, инициализация ImageProcessor...');
+    
+    // Очищаем предыдущий экземпляр если есть
+    if (imageProcessor) {
+        console.log('Очистка предыдущего экземпляра ImageProcessor');
+        imageProcessor.destroy();
+    }
+    
+    // Создаем новый экземпляр
+    try {
+        imageProcessor = new ImageProcessor();
+        console.log('ImageProcessor успешно инициализирован');
+    } catch (error) {
+        console.error('Ошибка инициализации ImageProcessor:', error);
+        return;
+    }
+    
+    // Делаем глобально доступным
+    window.imageProcessor = imageProcessor;
+    
+    console.log('ImageProcessor готов к работе');
 });
 
-// Make functions available globally for onclick handlers
-window.imageProcessor = imageProcessor;
+// Очистка при выгрузке страницы
+window.addEventListener('beforeunload', () => {
+    console.log('Очистка ImageProcessor перед выгрузкой страницы');
+    if (imageProcessor) {
+        imageProcessor.destroy();
+    }
+});

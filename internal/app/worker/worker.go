@@ -5,36 +5,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"strings"
-	"syscall"
+	"sync"
 	"time"
 
-	kafka_impl "image-processor/internal/broker/kafka"
+	"image-processor/internal/broker/kafka"
 	"image-processor/internal/config"
 	"image-processor/internal/domain"
 	minio_repo "image-processor/internal/repository/image/cloud/minio"
 	postgres_repo "image-processor/internal/repository/image/db/postgres"
 	"image-processor/internal/usecase/processor"
 
-	"github.com/segmentio/kafka-go"
 	"github.com/wb-go/wbf/dbpg"
 	"github.com/wb-go/wbf/zlog"
 )
 
 type Worker struct {
-	cfg       *config.Config
-	logger    *zlog.Zerolog
-	db        *dbpg.DB
-	broker    *kafka_impl.KafkaClient
-	fileRepo  *minio_repo.FileRepository
-	processor *processor.ImageProcessor
-	imageRepo *postgres_repo.ImagesRepository
+	cfg         *config.Config
+	logger      *zlog.Zerolog
+	db          *dbpg.DB
+	consumer    *kafka.ConsumerClient
+	processor   *processor.ImageProcessor
+	imageRepo   *postgres_repo.ImagesRepository
+	fileRepo    *minio_repo.FileRepository
+	concurrency int
+	wg          sync.WaitGroup
+	stopChan    chan struct{}
 }
 
 func NewWorker(cfg *config.Config, logger *zlog.Zerolog) (*Worker, error) {
+	retries := cfg.DefaultRetryStrategy()
+
 	dbOpts := &dbpg.Options{
 		MaxOpenConns:    cfg.DB.MaxOpenConns,
 		MaxIdleConns:    cfg.DB.MaxIdleConns,
@@ -46,184 +46,262 @@ func NewWorker(cfg *config.Config, logger *zlog.Zerolog) (*Worker, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	fileRepo, err := minio_repo.NewMinIORepository(cfg, cfg.DefaultRetryStrategy(), logger)
+	fileRepo, err := minio_repo.NewMinIORepository(cfg, retries, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file repository: %w", err)
 	}
 
-	brokerClient := kafka_impl.NewKafkaClient(cfg)
-	imageProcessor := processor.NewImageProcessor(logger)
-	imageRepo := postgres_repo.NewImagesRepository(db, cfg.DefaultRetryStrategy())
+	imageRepo := postgres_repo.NewImagesRepository(db, retries)
+	consumer := kafka.NewConsumerClient(cfg)
+	processor := processor.NewImageProcessor(fileRepo, logger)
+
+	concurrency := cfg.Worker.Concurrency
+
+	logger.Info().
+		Strs("brokers", cfg.Kafka.Brokers).
+		Str("topic", cfg.Kafka.ProcessingTopic).
+		Str("group", cfg.Kafka.GroupID).
+		Int("concurrency", concurrency).
+		Msg("Worker configuration")
 
 	return &Worker{
-		cfg:       cfg,
-		logger:    logger,
-		db:        db,
-		broker:    brokerClient,
-		fileRepo:  fileRepo,
-		processor: imageProcessor,
-		imageRepo: imageRepo,
+		cfg:         cfg,
+		logger:      logger,
+		db:          db,
+		consumer:    consumer,
+		processor:   processor,
+		imageRepo:   imageRepo,
+		fileRepo:    fileRepo,
+		concurrency: concurrency,
+		stopChan:    make(chan struct{}),
 	}, nil
 }
 
 func (w *Worker) Run() error {
+	w.logger.Info().Int("concurrency", w.concurrency).Msg("Starting worker")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	messages := make(chan kafka.Message, w.cfg.Worker.Concurrency)
+	messages := make(chan []byte, w.concurrency*2)
 
-	go w.broker.StartConsuming(ctx, messages, w.cfg.DefaultRetryStrategy())
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.consumeMessages(ctx, messages)
+	}()
 
-	for i := 0; i < w.cfg.Worker.Concurrency; i++ {
-		go w.worker(ctx, i, messages)
+	for i := 0; i < w.concurrency; i++ {
+		w.wg.Add(1)
+		go func(id int) {
+			defer w.wg.Done()
+			w.worker(ctx, id, messages)
+		}(i)
 	}
 
-	w.logger.Info().Int("concurrency", w.cfg.Worker.Concurrency).Msg("Worker started")
+	w.logger.Info().Msg("Worker started successfully")
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-w.stopChan
+	w.logger.Info().Msg("Shutting down worker")
 
-	sig := <-sigChan
-	w.logger.Info().Str("signal", sig.String()).Msg("Received signal, shutting down")
 	cancel()
 
+	close(messages)
+
+	w.wg.Wait()
+
+	if w.db != nil && w.db.Master != nil {
+		w.db.Master.Close()
+	}
+
+	if w.consumer != nil {
+		w.consumer.Close()
+	}
+
+	w.logger.Info().Msg("Worker stopped gracefully")
 	return nil
 }
 
-func (w *Worker) worker(ctx context.Context, id int, messages <-chan kafka.Message) {
+func (w *Worker) Stop() {
+	select {
+	case w.stopChan <- struct{}{}:
+	default:
+	}
+}
+
+func (w *Worker) consumeMessages(ctx context.Context, messages chan<- []byte) {
+	w.logger.Info().Msg("Starting Kafka consumer")
+
 	for {
 		select {
 		case <-ctx.Done():
-			w.logger.Info().Int("worker_id", id).Msg("Worker stopped")
+			w.logger.Info().Msg("Stopping Kafka consumer")
 			return
-		case msg := <-messages:
-			w.processMessage(ctx, id, msg)
+		default:
+			msg, err := w.consumer.Fetch(ctx, w.cfg.DefaultRetryStrategy())
+			if err != nil {
+				if ctx.Err() == nil {
+					w.logger.Error().Err(err).Msg("Failed to fetch message from Kafka")
+					select {
+					case <-time.After(2 * time.Second):
+						continue
+					case <-ctx.Done():
+						return
+					}
+				}
+				return
+			}
+
+			w.logger.Info().
+				Str("topic", msg.Topic).
+				Int("partition", msg.Partition).
+				Int64("offset", msg.Offset).
+				Int("size", len(msg.Value)).
+				Msg("Message received from Kafka")
+
+			select {
+			case messages <- msg.Value:
+				if err := w.consumer.Commit(ctx, msg); err != nil {
+					w.logger.Error().Err(err).Msg("Failed to commit message")
+				}
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }
 
-func (w *Worker) processMessage(ctx context.Context, workerID int, msg kafka.Message) {
+func (w *Worker) worker(ctx context.Context, id int, messages <-chan []byte) {
+	w.logger.Info().Int("worker_id", id).Msg("Worker started")
+
+	for {
+		select {
+		case <-ctx.Done():
+			w.logger.Debug().Int("worker_id", id).Msg("Worker stopping")
+			return
+		case msg, ok := <-messages:
+			if !ok {
+				return
+			}
+
+			startTime := time.Now()
+			w.logger.Debug().Int("worker_id", id).Int("message_size", len(msg)).Msg("Processing message")
+
+			if err := w.safeProcessMessage(ctx, id, msg); err != nil {
+				w.logger.Error().
+					Err(err).
+					Int("worker_id", id).
+					Msg("Failed to process message")
+			} else {
+				w.logger.Debug().
+					Int("worker_id", id).
+					Dur("duration", time.Since(startTime)).
+					Msg("Message processed successfully")
+			}
+		}
+	}
+}
+
+func (w *Worker) safeProcessMessage(ctx context.Context, workerID int, msg []byte) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			w.logger.Error().
+				Int("worker_id", workerID).
+				Interface("panic", r).
+				Msg("Panic recovered while processing message")
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+
+	return w.processMessage(ctx, msg)
+}
+
+func (w *Worker) processMessage(ctx context.Context, msg []byte) error {
 	var task domain.ProcessingTask
-	if err := json.Unmarshal(msg.Value, &task); err != nil {
-		w.logger.Error().Err(err).Int("worker_id", workerID).Msg("Failed to unmarshal task")
-		return
+	if err := json.Unmarshal(msg, &task); err != nil {
+		w.logger.Error().Err(err).Str("message", string(msg)).Msg("Failed to unmarshal task")
+		return fmt.Errorf("failed to unmarshal task: %w", err)
 	}
 
 	w.logger.Info().
-		Int("worker_id", workerID).
 		Str("task_id", task.ID).
 		Str("image_id", task.ImageID).
-		Msg("Processing task")
+		Int("operations", len(task.Operations)).
+		Msg("Processing task started")
 
 	reader, err := w.fileRepo.GetObject(ctx, task.OriginalPath)
 	if err != nil {
-		w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Failed to get original image")
-		w.sendFailureResult(ctx, task, fmt.Sprintf("Failed to get original image: %v", err))
-		return
-	}
+		w.logger.Error().Err(err).Str("image_id", task.ImageID).Str("path", task.OriginalPath).Msg("Failed to get original image")
 
-	data, err := io.ReadAll(reader)
-	reader.Close()
+		if updateErr := w.imageRepo.UpdateStatus(ctx, task.ImageID, domain.StatusFailed); updateErr != nil {
+			w.logger.Error().Err(updateErr).Str("image_id", task.ImageID).Msg("Failed to update status to failed")
+		}
+
+		return fmt.Errorf("failed to get original image: %w", err)
+	}
+	defer reader.Close()
+
+	imageData, err := io.ReadAll(reader)
 	if err != nil {
 		w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Failed to read image data")
-		w.sendFailureResult(ctx, task, fmt.Sprintf("Failed to read image data: %v", err))
-		return
+
+		if updateErr := w.imageRepo.UpdateStatus(ctx, task.ImageID, domain.StatusFailed); updateErr != nil {
+			w.logger.Error().Err(updateErr).Str("image_id", task.ImageID).Msg("Failed to update status to failed")
+		}
+
+		return fmt.Errorf("failed to read image data: %w", err)
 	}
 
-	result, err := w.processor.Process(ctx, &task, data)
+	result, err := w.processor.Process(ctx, &task, imageData)
 	if err != nil {
-		w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Processing failed")
-		w.sendFailureResult(ctx, task, fmt.Sprintf("Processing failed: %v", err))
-		return
+		w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Image processing failed")
+
+		if updateErr := w.imageRepo.UpdateStatus(ctx, task.ImageID, domain.StatusFailed); updateErr != nil {
+			w.logger.Error().Err(updateErr).Str("image_id", task.ImageID).Msg("Failed to update status to failed")
+		}
+
+		return fmt.Errorf("image processing failed: %w", err)
+	}
+
+	for operation, path := range result.ProcessedPaths {
+		processedImage := &domain.ProcessedImage{
+			ImageID:   task.ImageID,
+			Operation: domain.OperationType(operation),
+			Path:      path,
+			Status:    "completed",
+			Format:    task.Format,
+			CreatedAt: time.Now(),
+		}
+
+		if err := w.imageRepo.SaveProcessedImage(ctx, processedImage); err != nil {
+			w.logger.Error().Err(err).Str("image_id", task.ImageID).Str("operation", operation).Msg("Failed to save processed image metadata")
+		} else {
+			w.logger.Debug().
+				Str("image_id", task.ImageID).
+				Str("operation", operation).
+				Str("path", path).
+				Msg("Processed image saved to database")
+		}
 	}
 
 	if result.Status == domain.StatusCompleted {
-		for operation, path := range result.ProcessedPaths {
-			mimeType := w.getMimeTypeFromPath(path)
-
-			processed := &domain.ProcessedImage{
-				ImageID:    task.ImageID,
-				Operation:  domain.OperationType(operation),
-				Parameters: "",
-				Path:       path,
-				Size:       0,
-				MimeType:   mimeType,
-				Format:     task.Format,
-				Status:     "completed",
-				CreatedAt:  time.Now(),
-			}
-
-			if err := w.imageRepo.SaveProcessedImage(ctx, processed); err != nil {
-				w.logger.Error().Err(err).
-					Str("image_id", task.ImageID).
-					Str("operation", operation).
-					Msg("Failed to save processed image info")
-			}
-		}
-
 		if err := w.imageRepo.UpdateStatus(ctx, task.ImageID, domain.StatusCompleted); err != nil {
-			w.logger.Error().Err(err).
+			w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Failed to update status to completed")
+		} else {
+			w.logger.Info().
 				Str("image_id", task.ImageID).
-				Msg("Failed to update image status")
+				Int("processed_operations", len(result.ProcessedPaths)).
+				Msg("Image processing completed successfully")
 		}
 	} else {
 		if err := w.imageRepo.UpdateStatus(ctx, task.ImageID, domain.StatusFailed); err != nil {
-			w.logger.Error().Err(err).
-				Str("image_id", task.ImageID).
-				Msg("Failed to update image status to failed")
+			w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Failed to update status to failed")
 		}
+		w.logger.Error().
+			Str("image_id", task.ImageID).
+			Str("error", result.Error).
+			Msg("Image processing failed")
 	}
 
-	if err := w.sendResult(ctx, result); err != nil {
-		w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Failed to send result")
-		return
-	}
-
-	if err := w.broker.Commit(ctx, msg); err != nil {
-		w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Failed to commit message")
-	}
-
-	w.logger.Info().
-		Int("worker_id", workerID).
-		Str("image_id", task.ImageID).
-		Str("status", string(result.Status)).
-		Msg("Task completed")
-}
-
-func (w *Worker) getMimeTypeFromPath(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".jpg", ".jpeg":
-		return "image/jpeg"
-	case ".png":
-		return "image/png"
-	case ".gif":
-		return "image/gif"
-	case ".webp":
-		return "image/webp"
-	default:
-		return "image/jpeg"
-	}
-}
-
-func (w *Worker) sendResult(ctx context.Context, result *domain.ProcessingResult) error {
-	resultBytes, err := json.Marshal(result)
-	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
-	}
-
-	return w.broker.Send(ctx, w.cfg.DefaultRetryStrategy(), []byte(result.ImageID), resultBytes)
-}
-
-func (w *Worker) sendFailureResult(ctx context.Context, task domain.ProcessingTask, errorMsg string) {
-	result := &domain.ProcessingResult{
-		ID:      task.ID,
-		ImageID: task.ImageID,
-		Status:  domain.StatusFailed,
-		Error:   errorMsg,
-	}
-
-	if err := w.sendResult(ctx, result); err != nil {
-		w.logger.Error().Err(err).Str("image_id", task.ImageID).Msg("Failed to send failure result")
-	}
+	return nil
 }

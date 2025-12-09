@@ -9,9 +9,11 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"image-processor/internal/domain"
+	minio_repo "image-processor/internal/repository/image/cloud/minio"
 	"image-processor/internal/usecase/processor/operations"
 
 	"github.com/wb-go/wbf/zlog"
@@ -21,14 +23,16 @@ type ImageProcessor struct {
 	resizer     *operations.Resizer
 	thumbnailer *operations.Thumbnailer
 	watermarker *operations.Watermarker
+	fileRepo    *minio_repo.FileRepository
 	logger      *zlog.Zerolog
 }
 
-func NewImageProcessor(logger *zlog.Zerolog) *ImageProcessor {
+func NewImageProcessor(fileRepo *minio_repo.FileRepository, logger *zlog.Zerolog) *ImageProcessor {
 	return &ImageProcessor{
 		resizer:     operations.NewResizer(),
 		thumbnailer: operations.NewThumbnailer(),
 		watermarker: operations.NewWatermarker(),
+		fileRepo:    fileRepo,
 		logger:      logger,
 	}
 }
@@ -63,7 +67,7 @@ func (p *ImageProcessor) Process(ctx context.Context, task *domain.ProcessingTas
 		Msg("Starting image processing")
 
 	for _, operation := range task.Operations {
-		processedPath, err := p.applyOperation(ctx, task, img, targetFormat, operation)
+		processedPath, processedData, err := p.applyOperation(ctx, task, img, targetFormat, operation)
 		if err != nil {
 			result.Status = domain.StatusFailed
 			result.Error = fmt.Sprintf("Operation %s failed: %v", operation.Type, err)
@@ -75,12 +79,26 @@ func (p *ImageProcessor) Process(ctx context.Context, task *domain.ProcessingTas
 			return result, fmt.Errorf("operation %s failed: %w", operation.Type, err)
 		}
 
+		err = p.fileRepo.SaveProcessed(ctx, processedPath, bytes.NewReader(processedData), int64(len(processedData)), getContentType(processedPath))
+		if err != nil {
+			result.Status = domain.StatusFailed
+			result.Error = fmt.Sprintf("Failed to save processed image: %v", err)
+			p.logger.Error().
+				Err(err).
+				Str("image_id", task.ImageID).
+				Str("operation", string(operation.Type)).
+				Str("path", processedPath).
+				Msg("Failed to save processed image")
+			return result, fmt.Errorf("failed to save processed image: %w", err)
+		}
+
 		result.ProcessedPaths[string(operation.Type)] = processedPath
 		p.logger.Debug().
 			Str("image_id", task.ImageID).
 			Str("operation", string(operation.Type)).
 			Str("path", processedPath).
-			Msg("Operation completed")
+			Int("size", len(processedData)).
+			Msg("Operation completed and saved")
 	}
 
 	p.logger.Info().
@@ -92,7 +110,7 @@ func (p *ImageProcessor) Process(ctx context.Context, task *domain.ProcessingTas
 	return result, nil
 }
 
-func (p *ImageProcessor) applyOperation(ctx context.Context, task *domain.ProcessingTask, img image.Image, format string, operation domain.OperationParams) (string, error) {
+func (p *ImageProcessor) applyOperation(ctx context.Context, task *domain.ProcessingTask, img image.Image, format string, operation domain.OperationParams) (string, []byte, error) {
 	var processedData io.Reader
 	var processedFormat string
 	var err error
@@ -105,27 +123,20 @@ func (p *ImageProcessor) applyOperation(ctx context.Context, task *domain.Proces
 	case domain.OpWatermark:
 		processedData, processedFormat, err = p.watermarker.Process(ctx, img, format, operation.Parameters)
 	default:
-		return "", fmt.Errorf("unsupported operation type: %s", operation.Type)
+		return "", nil, fmt.Errorf("unsupported operation type: %s", operation.Type)
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("failed to process operation %s: %w", operation.Type, err)
+		return "", nil, fmt.Errorf("failed to process operation %s: %w", operation.Type, err)
 	}
-
-	path := p.generatePath(task.ImageID, operation.Type, processedFormat, operation.Parameters)
 
 	data, err := io.ReadAll(processedData)
 	if err != nil {
-		return "", fmt.Errorf("failed to read processed data: %w", err)
+		return "", nil, fmt.Errorf("failed to read processed data: %w", err)
 	}
 
-	p.logger.Debug().
-		Str("image_id", task.ImageID).
-		Str("operation", string(operation.Type)).
-		Int("data_size", len(data)).
-		Msg("Processed data ready for storage")
-
-	return path, nil
+	path := p.generatePath(task.ImageID, operation.Type, processedFormat, operation.Parameters)
+	return path, data, nil
 }
 
 func (p *ImageProcessor) generatePath(imageID string, operation domain.OperationType, format string, params map[string]interface{}) string {
@@ -133,11 +144,28 @@ func (p *ImageProcessor) generatePath(imageID string, operation domain.Operation
 
 	switch operation {
 	case domain.OpResize:
-		width, _ := params["width"].(int)
-		height, _ := params["height"].(int)
+		var width int
+		if w, ok := params["width"].(float64); ok {
+			width = int(w)
+		} else if w, ok := params["width"].(int); ok {
+			width = w
+		}
+
+		var height int
+		if h, ok := params["height"].(float64); ok {
+			height = int(h)
+		} else if h, ok := params["height"].(int); ok {
+			height = h
+		}
+
 		return fmt.Sprintf("%sresize/%s/%dx%d.%s", basePath, imageID, width, height, format)
 	case domain.OpThumbnail:
-		size, _ := params["size"].(int)
+		var size int
+		if s, ok := params["size"].(float64); ok {
+			size = int(s)
+		} else if s, ok := params["size"].(int); ok {
+			size = s
+		}
 		if size == 0 {
 			size = domain.DefaultThumbnailSize
 		}
@@ -146,5 +174,25 @@ func (p *ImageProcessor) generatePath(imageID string, operation domain.Operation
 		return fmt.Sprintf("%swatermarked/%s/watermarked.%s", basePath, imageID, format)
 	default:
 		return fmt.Sprintf("%s%s/%s/processed.%s", basePath, strings.ToLower(string(operation)), imageID, format)
+	}
+}
+
+func getContentType(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".tiff", ".tif":
+		return "image/tiff"
+	default:
+		return "image/jpeg"
 	}
 }

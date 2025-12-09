@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -34,12 +35,24 @@ func NewImageUsecase(repo imageRepository, fileRepo fileRepository, producer ima
 }
 
 func (i *ImageUsecase) UploadImage(ctx context.Context, file io.Reader, filename, contentType string, fileSize int64, operations []domain.OperationParams) (*domain.Image, error) {
+	i.logger.Info().Str("filename", filename).Int64("size", fileSize).Msg("Starting image upload")
+
+	if fileSize > domain.DefaultMaxUploadSize {
+		i.logger.Warn().Str("filename", filename).Int64("size", fileSize).Msg("File too large")
+		return nil, fmt.Errorf("%w: max size is %d bytes", ErrFileTooLarge, domain.DefaultMaxUploadSize)
+	}
+
+	if !isValidImageFormat(contentType) {
+		i.logger.Warn().Str("filename", filename).Str("content_type", contentType).Msg("Invalid file format")
+		return nil, fmt.Errorf("%w: %s", ErrInvalidFileFormat, contentType)
+	}
+
 	imageID := uuid.New().String()
 
 	originalPath, err := i.fileRepo.SaveOriginal(ctx, filename, file, fileSize)
 	if err != nil {
 		i.logger.Error().Err(err).Str("filename", filename).Msg("Failed to save original image")
-		return nil, fmt.Errorf("failed to save image: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrStorageError, err)
 	}
 
 	img := &domain.Image{
@@ -55,8 +68,11 @@ func (i *ImageUsecase) UploadImage(ctx context.Context, file io.Reader, filename
 	}
 
 	if err := i.repo.Save(ctx, img); err != nil {
-		i.fileRepo.DeleteObject(ctx, originalPath)
-		return nil, fmt.Errorf("failed to save image metadata: %w", err)
+		i.logger.Error().Err(err).Str("image_id", imageID).Msg("Failed to save image metadata")
+		if delErr := i.fileRepo.DeleteObject(ctx, originalPath); delErr != nil {
+			i.logger.Error().Err(delErr).Str("path", originalPath).Msg("Failed to delete original file after DB error")
+		}
+		return nil, fmt.Errorf("%w: %v", ErrDatabaseError, err)
 	}
 
 	task := &domain.ProcessingTask{
@@ -68,14 +84,22 @@ func (i *ImageUsecase) UploadImage(ctx context.Context, file io.Reader, filename
 		Format:       getFormatFromContentType(contentType),
 	}
 
-	if err := i.producer.Send(ctx, task); err != nil {
+	taskBytes, err := json.Marshal(task)
+	if err != nil {
+		i.logger.Error().Err(err).Str("image_id", imageID).Msg("Failed to marshal task")
+		return nil, fmt.Errorf("%w: %v", ErrMessageQueueError, err)
+	}
+
+	if err := i.producer.SendProcessingTask(ctx, i.retries, []byte(imageID), taskBytes); err != nil {
 		i.logger.Error().Err(err).Str("image_id", imageID).Msg("Failed to send task to Kafka")
-		i.updateStatus(ctx, imageID, domain.StatusFailed)
-		return nil, fmt.Errorf("failed to send processing task: %w", err)
+		if updateErr := i.repo.UpdateStatus(ctx, imageID, domain.StatusFailed); updateErr != nil {
+			i.logger.Error().Err(updateErr).Str("image_id", imageID).Msg("Failed to update status to failed")
+		}
+		return nil, fmt.Errorf("%w: %v", ErrMessageQueueError, err)
 	}
 
 	if err := i.repo.UpdateStatus(ctx, imageID, domain.StatusProcessing); err != nil {
-		i.logger.Error().Err(err).Str("image_id", imageID).Msg("Failed to update status")
+		i.logger.Error().Err(err).Str("image_id", imageID).Msg("Failed to update status to processing")
 		img.Status = domain.StatusUploaded
 	} else {
 		img.Status = domain.StatusProcessing
@@ -86,51 +110,73 @@ func (i *ImageUsecase) UploadImage(ctx context.Context, file io.Reader, filename
 }
 
 func (i *ImageUsecase) GetImage(ctx context.Context, id, operation string) (*domain.Image, io.ReadCloser, error) {
+	i.logger.Debug().Str("image_id", id).Str("operation", operation).Msg("Getting image")
+
 	img, err := i.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get image: %w", err)
+		if err == repoImage.ErrImageNotFound {
+			i.logger.Info().Str("image_id", id).Msg("Image not found")
+			return nil, nil, ErrImageNotFound
+		}
+		i.logger.Error().Err(err).Str("image_id", id).Msg("Failed to get image from DB")
+		return nil, nil, fmt.Errorf("%w: %v", ErrDatabaseError, err)
 	}
 
 	if operation == "" {
 		reader, err := i.fileRepo.GetObject(ctx, img.OriginalPath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to get original image: %w", err)
+			i.logger.Error().Err(err).Str("image_id", id).Str("path", img.OriginalPath).Msg("Failed to get original image from storage")
+			return nil, nil, fmt.Errorf("%w: %v", ErrStorageError, err)
 		}
 		return img, reader, nil
 	}
 
 	processed, err := i.repo.GetProcessedImageByOperation(ctx, id, operation)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get processed image: %w", err)
+		i.logger.Error().Err(err).Str("image_id", id).Str("operation", operation).Msg("Failed to get processed image from DB")
+		return nil, nil, fmt.Errorf("%w: %v", ErrDatabaseError, err)
 	}
 
 	if processed == nil {
-		return nil, nil, repoImage.ErrProcessedImageNotFound
+		i.logger.Info().Str("image_id", id).Str("operation", operation).Msg("Processed image not found")
+		return nil, nil, ErrProcessedImageNotFound
 	}
 
 	reader, err := i.fileRepo.GetObject(ctx, processed.Path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get processed image file: %w", err)
+		i.logger.Error().Err(err).Str("image_id", id).Str("path", processed.Path).Msg("Failed to get processed image from storage")
+		return nil, nil, fmt.Errorf("%w: %v", ErrStorageError, err)
 	}
 
 	return img, reader, nil
 }
 
 func (i *ImageUsecase) GetStatus(ctx context.Context, id string) (domain.ImageStatus, error) {
+	i.logger.Debug().Str("image_id", id).Msg("Getting image status")
+
 	img, err := i.repo.GetByID(ctx, id)
 	if err != nil {
-		return "", fmt.Errorf("failed to get image status: %w", err)
+		if err == repoImage.ErrImageNotFound {
+			i.logger.Info().Str("image_id", id).Msg("Image not found when getting status")
+			return "", ErrImageNotFound
+		}
+		i.logger.Error().Err(err).Str("image_id", id).Msg("Failed to get image status from DB")
+		return "", fmt.Errorf("%w: %v", ErrDatabaseError, err)
 	}
 	return img.Status, nil
 }
 
 func (i *ImageUsecase) DeleteImage(ctx context.Context, id string) error {
+	i.logger.Info().Str("image_id", id).Msg("Deleting image")
+
 	img, err := i.repo.GetByID(ctx, id)
 	if err != nil {
 		if err == repoImage.ErrImageNotFound {
-			return repoImage.ErrImageNotFound
+			i.logger.Info().Str("image_id", id).Msg("Image not found for deletion")
+			return ErrImageNotFound
 		}
-		return fmt.Errorf("failed to get image for deletion: %w", err)
+		i.logger.Error().Err(err).Str("image_id", id).Msg("Failed to get image for deletion")
+		return fmt.Errorf("%w: %v", ErrDatabaseError, err)
 	}
 
 	if err := i.fileRepo.DeleteObject(ctx, img.OriginalPath); err != nil {
@@ -147,17 +193,22 @@ func (i *ImageUsecase) DeleteImage(ctx context.Context, id string) error {
 	}
 
 	if err := i.repo.UpdateStatus(ctx, id, domain.StatusDeleted); err != nil {
-		return fmt.Errorf("failed to update image status to deleted: %w", err)
+		i.logger.Error().Err(err).Str("image_id", id).Msg("Failed to update image status to deleted")
+		return fmt.Errorf("%w: %v", ErrDatabaseError, err)
 	}
 
 	i.logger.Info().Str("image_id", id).Msg("Image deleted successfully")
 	return nil
 }
 
-func (i *ImageUsecase) updateStatus(ctx context.Context, imageID string, status domain.ImageStatus) {
-	if err := i.repo.UpdateStatus(ctx, imageID, status); err != nil {
-		i.logger.Error().Err(err).Str("image_id", imageID).Str("status", string(status)).Msg("Failed to update status")
+func isValidImageFormat(contentType string) bool {
+	validFormats := []string{"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/tiff"}
+	for _, format := range validFormats {
+		if contentType == format {
+			return true
+		}
 	}
+	return false
 }
 
 func getFormatFromContentType(contentType string) domain.ImageFormat {
@@ -170,33 +221,11 @@ func getFormatFromContentType(contentType string) domain.ImageFormat {
 		return domain.FormatGIF
 	case strings.Contains(contentType, "webp"):
 		return domain.FormatWebP
+	case strings.Contains(contentType, "bmp"):
+		return domain.FormatBMP
+	case strings.Contains(contentType, "tiff"):
+		return domain.FormatTIFF
 	default:
 		return domain.FormatJPEG
 	}
-}
-
-func (i *ImageUsecase) SaveProcessingResult(ctx context.Context, result *domain.ProcessingResult) error {
-	if err := i.repo.UpdateStatus(ctx, result.ImageID, result.Status); err != nil {
-		return fmt.Errorf("failed to update image status: %w", err)
-	}
-
-	for operation, path := range result.ProcessedPaths {
-		processed := &domain.ProcessedImage{
-			ImageID:   result.ImageID,
-			Operation: domain.OperationType(operation),
-			Path:      path,
-			Size:      0,
-			MimeType:  "image/jpeg",
-			Format:    domain.FormatJPEG,
-			Status:    "completed",
-			CreatedAt: time.Now(),
-		}
-
-		if err := i.repo.SaveProcessedImage(ctx, processed); err != nil {
-			i.logger.Error().Err(err).Str("image_id", result.ImageID).Str("operation", operation).Msg("Failed to save processed image info")
-		}
-	}
-
-	i.logger.Info().Str("image_id", result.ImageID).Str("status", string(result.Status)).Msg("Processing result saved")
-	return nil
 }

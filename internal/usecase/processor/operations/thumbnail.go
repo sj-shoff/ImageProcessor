@@ -23,9 +23,21 @@ func NewThumbnailer() *Thumbnailer {
 }
 
 func (t *Thumbnailer) Process(ctx context.Context, img image.Image, format string, params map[string]interface{}) (io.Reader, string, error) {
-	size, ok := params["size"].(int)
-	if !ok {
+	var size int
+	if s, ok := params["size"].(float64); ok {
+		size = int(s)
+	} else if s, ok := params["size"].(int); ok {
+		size = s
+	} else if s, ok := params["size"].(int64); ok {
+		size = int(s)
+	} else if s, ok := params["size"].(int32); ok {
+		size = int(s)
+	} else {
 		size = domain.DefaultThumbnailSize
+	}
+
+	if size <= 0 {
+		return nil, "", fmt.Errorf("size must be a positive number")
 	}
 
 	cropToFit, _ := params["crop_to_fit"].(bool)

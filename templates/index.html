@@ -130,7 +130,7 @@
                         <h2 class="card-title mb-0">
                             <i class="fas fa-images"></i> Мои изображения
                         </h2>
-                        <button class="btn btn-sm btn-outline-primary" onclick="imageProcessor.loadImages()">
+                        <button class="btn btn-sm btn-outline-primary" onclick="window.imageProcessor.loadImages()">
                             <i class="fas fa-sync-alt"></i> Обновить
                         </button>
                     </div>
@@ -160,7 +160,7 @@
                             <div class="col-md-3 mb-3">
                                 <div class="status-processing p-3 rounded">
                                     <i class="fas fa-cog fa-spin fa-2x mb-2"></i>
-                                    <div>В обработке</div>
+                                    <div class="status-title">Обработка</div>
                                 </div>
                             </div>
                             <div class="col-md-3 mb-3">
@@ -239,10 +239,21 @@
     <script src="/static/js/app.js"></script>
 
     <script>
-        // Initialize when DOM is loaded
-        document.addEventListener('DOMContentLoaded', () => {
-            window.imageProcessor = new ImageProcessor();
-        });
+        // Защита от двойной отправки формы
+        (function() {
+            const form = document.getElementById('uploadForm');
+            if (form) {
+                // Добавляем обработчик для предотвращения двойной отправки
+                form.addEventListener('submit', function(e) {
+                    const submitBtn = document.getElementById('uploadBtn');
+                    if (submitBtn && submitBtn.disabled) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                }, { capture: true });
+            }
+        })();
     </script>
 </body>
 </html>

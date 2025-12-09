@@ -15,7 +15,7 @@ type ConsumerClient struct {
 
 func NewConsumerClient(cfg *config.Config) *ConsumerClient {
 	return &ConsumerClient{
-		consumer: wbkafka.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.ResultsTopic, cfg.Kafka.GroupID),
+		consumer: wbkafka.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.ProcessingTopic, cfg.Kafka.GroupID),
 	}
 }
 
@@ -27,10 +27,10 @@ func (c *ConsumerClient) Commit(ctx context.Context, msg kafka.Message) error {
 	return c.consumer.Commit(ctx, msg)
 }
 
-func (c *ConsumerClient) Close() error {
-	return c.consumer.Close()
-}
-
 func (c *ConsumerClient) StartConsuming(ctx context.Context, out chan<- kafka.Message, strategy retry.Strategy) {
 	c.consumer.StartConsuming(ctx, out, strategy)
+}
+
+func (c *ConsumerClient) Close() error {
+	return c.consumer.Close()
 }
