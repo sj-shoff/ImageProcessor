@@ -12,4 +12,5 @@ type imageUsecase interface {
 	GetImage(ctx context.Context, id, operation string) (*domain.Image, io.ReadCloser, error)
 	GetStatus(ctx context.Context, id string) (domain.ImageStatus, error)
 	DeleteImage(ctx context.Context, id string) error
+	ListImages(ctx context.Context, limit, offset int) ([]domain.Image, error)
 }

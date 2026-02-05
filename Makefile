@@ -15,12 +15,10 @@ build:
 
 docker-up:
 	docker-compose up -d --build
+	make kafka-init
 
 docker-down:
 	docker-compose down
-
-test:
-	go test ./... -v
 
 kafka-init:
 	docker exec -it imageprocessor_kafka_1 kafka-topics --create --topic image-processing --bootstrap-server kafka:9092 --partitions 3 --replication-factor 1

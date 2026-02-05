@@ -87,17 +87,17 @@ services:
     build: .
     depends_on:
       - app
+      - kafka
     env_file:
       - .env
     restart: unless-stopped
     networks:
       - app-network
     command: ["./worker"]
-
+    
 volumes:
   postgres_data:
   minio_data:
-
 networks:
   app-network:
     driver: bridge

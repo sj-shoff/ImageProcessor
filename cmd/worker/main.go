@@ -1,8 +1,8 @@
 package main
 
 import (
-	"image-processor/internal/app/worker"
 	"image-processor/internal/config"
+	"image-processor/internal/worker"
 	"os"
 
 	"github.com/wb-go/wbf/zlog"

@@ -20,7 +20,6 @@ type Config struct {
 		MaxIdleConns    int           `env:"DB_MAX_IDLE_CONNS"`
 		ConnMaxLifetime time.Duration `env:"DB_CONN_MAX_LIFETIME"`
 	}
-
 	Server struct {
 		Addr            string        `env:"SERVER_PORT" validate:"required"`
 		ReadTimeout     time.Duration `env:"SERVER_READ_TIMEOUT" validate:"required"`
@@ -28,13 +27,11 @@ type Config struct {
 		IdleTimeout     time.Duration `env:"SERVER_IDLE_TIMEOUT" validate:"required"`
 		ShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" validate:"required"`
 	}
-
 	Retries struct {
 		Attempts int     `env:"RETRIES_ATTEMPTS" validate:"required"`
 		DelayMs  int     `env:"RETRIES_DELAY_MS" validate:"required"`
 		Backoff  float64 `env:"RETRIES_BACKOFF" validate:"required"`
 	}
-
 	MinIO struct {
 		Endpoint  string `env:"MINIO_ENDPOINT" validate:"required"`
 		Region    string `env:"MINIO_REGION" validate:"required"`
@@ -43,14 +40,12 @@ type Config struct {
 		Bucket    string `env:"MINIO_BUCKET"`
 		UseSSL    bool   `env:"MINIO_USE_SSL"`
 	}
-
 	Kafka struct {
 		Brokers         []string `env:"KAFKA_BROKERS" envSeparator:"," validate:"required"`
 		ProcessingTopic string   `env:"KAFKA_PROCESSING_TOPIC"`
 		ResultsTopic    string   `env:"KAFKA_RESULTS_TOPIC"`
 		GroupID         string   `env:"KAFKA_GROUP_ID"`
 	}
-
 	Worker struct {
 		Concurrency int `env:"WORKER_CONCURRENCY"`
 	}
@@ -58,17 +53,14 @@ type Config struct {
 
 func MustLoad() (*Config, error) {
 	var cfg Config
-
 	err := cleanenv.ReadEnv(&cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read environment variables: %w", err)
 	}
-
 	validate := validator.New()
 	if err := validate.Struct(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
-
 	return &cfg, nil
 }
 

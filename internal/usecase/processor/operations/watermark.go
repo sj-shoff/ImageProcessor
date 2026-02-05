@@ -42,34 +42,27 @@ func (w *Watermarker) Process(ctx context.Context, img image.Image, format strin
 	if !ok || text == "" {
 		text = domain.DefaultWatermarkText
 	}
-
 	opacity, ok := params["opacity"].(float64)
 	if !ok || opacity <= 0 {
 		opacity = domain.DefaultWatermarkOpacity
 	}
-
 	position, ok := params["position"].(string)
 	if !ok {
 		position = string(domain.WatermarkBottomRight)
 	}
-
 	fontSize, ok := params["font_size"].(float64)
 	if !ok || fontSize <= 0 {
 		fontSize = 36
 	}
-
 	fontColor, ok := params["font_color"].(string)
 	if !ok {
 		fontColor = "255,255,255"
 	}
-
 	watermarked, err := w.addTextWatermark(img, text, position, opacity, fontSize, fontColor)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to add watermark: %w", err)
 	}
-
 	buf := new(bytes.Buffer)
-
 	switch strings.ToLower(format) {
 	case "jpg", "jpeg":
 		err = jpeg.Encode(buf, watermarked, &jpeg.Options{Quality: domain.DefaultJPEGQuality})
@@ -84,11 +77,9 @@ func (w *Watermarker) Process(ctx context.Context, img image.Image, format strin
 		err = jpeg.Encode(buf, watermarked, &jpeg.Options{Quality: domain.DefaultJPEGQuality})
 		format = "jpeg"
 	}
-
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encode watermarked image: %w", err)
 	}
-
 	return buf, format, nil
 }
 
@@ -96,17 +87,14 @@ func (w *Watermarker) addTextWatermark(img image.Image, text, position string, o
 	if w.font == nil {
 		return nil, fmt.Errorf("font not loaded")
 	}
-
 	bounds := img.Bounds()
 	result := image.NewRGBA(bounds)
 	draw.Draw(result, bounds, img, image.Point{}, draw.Src)
-
 	col, err := parseColor(fontColorStr, opacity)
 	if err != nil {
 		fmt.Printf("Color parse error: %v, using black\n", err)
 		col = color.RGBA{0, 0, 0, uint8(255 * opacity)}
 	}
-
 	c := freetype.NewContext()
 	c.SetDPI(72)
 	c.SetFont(w.font)
@@ -114,12 +102,10 @@ func (w *Watermarker) addTextWatermark(img image.Image, text, position string, o
 	c.SetClip(result.Bounds())
 	c.SetDst(result)
 	c.SetSrc(image.NewUniform(col))
-
 	face := truetype.NewFace(w.font, &truetype.Options{
 		Size: fontSize,
 		DPI:  72,
 	})
-
 	var textWidth fixed.Int26_6
 	for _, x := range text {
 		awidth, ok := face.GlyphAdvance(x)
@@ -127,18 +113,13 @@ func (w *Watermarker) addTextWatermark(img image.Image, text, position string, o
 			textWidth += awidth
 		}
 	}
-
 	textHeight := fixed.Int26_6(fontSize * 64 * 1.2)
-
 	widthPx := int(textWidth.Ceil())
 	heightPx := int(textHeight.Ceil())
-
 	fmt.Printf("Text '%s': width=%dpx, height=%dpx\n", text, widthPx, heightPx)
 	fmt.Printf("Image size: %dx%d\n", bounds.Dx(), bounds.Dy())
-
 	margin := 20
 	var pt fixed.Point26_6
-
 	switch domain.WatermarkPosition(position) {
 	case domain.WatermarkTopLeft:
 		pt = freetype.Pt(margin, margin+heightPx)
@@ -165,15 +146,12 @@ func (w *Watermarker) addTextWatermark(img image.Image, text, position string, o
 		pt = freetype.Pt(bounds.Dx()-widthPx-margin, bounds.Dy()-margin)
 		fmt.Println("Position: default (bottom-right)")
 	}
-
 	fmt.Printf("Drawing at: x=%d, y=%d\n", pt.X.Ceil(), pt.Y.Ceil())
-
 	c.SetFontSize(fontSize)
 	_, err = c.DrawString(text, pt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to draw watermark text: %w", err)
 	}
-
 	fmt.Println("Watermark drawn successfully")
 	return result, nil
 }
@@ -181,23 +159,18 @@ func (w *Watermarker) addTextWatermark(img image.Image, text, position string, o
 func parseColor(colorStr string, opacity float64) (color.RGBA, error) {
 	colorStr = strings.ReplaceAll(colorStr, " ", "")
 	parts := strings.Split(colorStr, ",")
-
 	if len(parts) != 3 && len(parts) != 4 {
 		return color.RGBA{255, 255, 255, uint8(255 * opacity)}, fmt.Errorf("invalid color format")
 	}
-
 	r, err1 := strconv.Atoi(parts[0])
 	g, err2 := strconv.Atoi(parts[1])
 	b, err3 := strconv.Atoi(parts[2])
-
 	if err1 != nil || err2 != nil || err3 != nil {
 		return color.RGBA{255, 255, 255, uint8(255 * opacity)}, fmt.Errorf("invalid color values")
 	}
-
 	r = clamp(r, 0, 255)
 	g = clamp(g, 0, 255)
 	b = clamp(b, 0, 255)
-
 	var a uint8
 	if len(parts) == 4 {
 		aVal, err := strconv.Atoi(parts[3])
@@ -209,7 +182,6 @@ func parseColor(colorStr string, opacity float64) (color.RGBA, error) {
 	} else {
 		a = uint8(255 * opacity)
 	}
-
 	return color.RGBA{uint8(r), uint8(g), uint8(b), a}, nil
 }
 

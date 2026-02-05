@@ -4,9 +4,8 @@ import (
 	"context"
 	"io"
 
+	"image-processor/internal/broker"
 	"image-processor/internal/domain"
-
-	"github.com/wb-go/wbf/retry"
 )
 
 type imageRepository interface {
@@ -32,5 +31,5 @@ type fileRepository interface {
 }
 
 type imageProducer interface {
-	SendProcessingTask(ctx context.Context, strategy retry.Strategy, key, value []byte) error
+	broker.Producer
 }

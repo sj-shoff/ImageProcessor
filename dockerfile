@@ -20,8 +20,7 @@ RUN apk add --no-cache ca-certificates tzdata curl postgresql-client
 
 COPY --from=builder /app/image-processor /app/worker /app/
 COPY static /app/static
-COPY templates /app/templates
 
-EXPOSE 8004
+EXPOSE 8034
 
 CMD ["./image-processor"]

@@ -10,15 +10,12 @@ import (
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
 		zlog.Logger.Info().
 			Str("method", r.Method).
 			Str("path", r.URL.Path).
 			Str("query", r.URL.RawQuery).
 			Msg("Request started")
-
 		next.ServeHTTP(w, r)
-
 		duration := time.Since(start)
 		zlog.Logger.Info().
 			Str("method", r.Method).
@@ -35,7 +32,6 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 				zlog.Logger.Error().
 					Interface("error", err).
 					Msg("Panic recovered")
-
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 			}
 		}()

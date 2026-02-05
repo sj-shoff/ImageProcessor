@@ -9,7 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	kafka_impl "image-processor/internal/broker/kafka"
+	"image-processor/internal/broker"
+	"image-processor/internal/broker/kafka"
 	"image-processor/internal/config"
 	image_h "image-processor/internal/http-server/handler/image"
 	"image-processor/internal/http-server/router"
@@ -26,34 +27,30 @@ type App struct {
 	server   *http.Server
 	logger   *zlog.Zerolog
 	db       *dbpg.DB
-	producer *kafka_impl.ProducerClient
+	producer broker.Producer
 }
 
 func NewApp(cfg *config.Config, logger *zlog.Zerolog) (*App, error) {
 	retries := cfg.DefaultRetryStrategy()
-
 	dbOpts := &dbpg.Options{
 		MaxOpenConns:    cfg.DB.MaxOpenConns,
 		MaxIdleConns:    cfg.DB.MaxIdleConns,
 		ConnMaxLifetime: cfg.DB.ConnMaxLifetime,
 	}
-
 	db, err := dbpg.New(cfg.DBDSN(), []string{}, dbOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	fileRepo, err := minio_repo.NewMinIORepository(cfg, retries, logger)
+	fileRepo, err := minio_repo.NewMinIORepository(cfg, retries)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file repository: %w", err)
 	}
 
 	imageRepo := postgres_repo.NewImagesRepository(db, retries)
-
-	producer := kafka_impl.NewProducerClient(cfg)
+	producer := broker.Producer(kafka.NewProducerClient(cfg))
 
 	imageUsecase := image_uc.NewImageUsecase(imageRepo, fileRepo, producer, logger, retries)
-
 	imageHandler := image_h.NewImageHandler(imageUsecase, logger)
 
 	h := &router.Handler{
@@ -111,7 +108,6 @@ func (a *App) Run() error {
 		if a.db != nil && a.db.Master != nil {
 			a.db.Master.Close()
 		}
-
 		if a.producer != nil {
 			a.producer.Close()
 		}
