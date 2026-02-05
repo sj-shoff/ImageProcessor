@@ -22,6 +22,7 @@ make docker-up
 
 # 4. Применить миграции БД
 make migrate-up
+```
 
 Откройте в браузере: [http://localhost:8034](http://localhost:8034)
 
