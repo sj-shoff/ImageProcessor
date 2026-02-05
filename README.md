@@ -28,14 +28,14 @@ make migrate-up
 
 ## Команды Makefile
 
->`make build` - Сборка бинарных файлов (`image-processor`, `worker`) 
->`make run` - Запуск HTTP-сервера локально 
->`make run-worker` - Запуск воркера обработки изображений локально 
->`make migrate` - Применение миграций БД через `goose` 
->`make migrate-down` - Откат последней миграции 
->`make kafka-init` - Создание топиков Kafka (`image-processing`, `image-processed`) 
->`make docker-up` - Сборка и запуск всего стека через Docker Compose 
->`make docker-down` - Остановка контейнеров 
+- `make build` - Сборка бинарных файлов (`image-processor`, `worker`) 
+- `make run` - Запуск HTTP-сервера локально 
+- `make run-worker` - Запуск воркера обработки изображений локально 
+- `make migrate` - Применение миграций БД через `goose` 
+- `make migrate-down` - Откат последней миграции 
+- `make kafka-init` - Создание топиков Kafka (`image-processing`, `image-processed`) 
+- `make docker-up` - Сборка и запуск всего стека через Docker Compose 
+- `make docker-down` - Остановка контейнеров 
 
 ## Требования
 
