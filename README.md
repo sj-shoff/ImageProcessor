@@ -1,6 +1,6 @@
 # ImageProcessor — очередь фоновой обработки изображений
 
-[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go)](https://golang.org)
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://golang.org)
 [![Kafka](https://img.shields.io/badge/Apache_Kafka-3.4+-231F20?logo=apache-kafka)](https://kafka.apache.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-4169E1?logo=postgresql)](https://www.postgresql.org)
 [![MinIO](https://img.shields.io/badge/MinIO-Latest-2683C9?logo=minio)](https://min.io)
